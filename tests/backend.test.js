@@ -10,6 +10,39 @@ import {
   hotel,
 } from "../server/domain.js";
 import { routeQuestion } from "../server/ai.js";
+import { searchNearbyHotels } from "../server/places.js";
+test("device coordinates drive live lookup without geocoding or an AI key", async () => {
+  let calls = 0;
+  const deviceApp = createApp({ logger: () => {}, aiOptions: { demo: true }, placesOptions: {
+    fetchImpl: async (url) => {
+      calls++;
+      assert.match(decodeURIComponent(url), /around:10000,0,0/);
+      assert.ok(!url.includes("nominatim"));
+      return { ok: true, json: async () => ({ elements: [
+        { lat: 0.02, lon: 0, tags: { name: "Far Hotel" } },
+        { lat: 0.001, lon: 0, tags: { name: "Near Hotel" } },
+        { lat: 1, lon: 0, tags: { name: "Outside radius" } },
+      ] }) };
+    },
+  } });
+  const result = await request(deviceApp).post("/api/chat").send({
+    message: "Find hotels near my current location", position: { lat: 0, lon: 0 },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls, 1);
+  assert.deepEqual(result.body.nearbyHotels.map(h => [h.name, h.distance]), [
+    ["Near Hotel", "111 m"], ["Far Hotel", "2.2 km"],
+  ]);
+  assert.match(result.body.notice, /straight-line/);
+  assert.equal(result.body.mode, "location");
+});
+
+test("invalid device coordinates are rejected before provider requests", async () => {
+  for (const position of [{ lat: 91, lon: 0 }, { lat: 0, lon: -181 }, { lat: "0", lon: 0 }, { lat: 0 }]) {
+    const result = await request(createApp({ logger: () => {} })).post("/api/chat").send({ message: "Nearby hotels", position });
+    assert.equal(result.status, 400);
+  }
+});
 const app = createApp({
   aiOptions: { demo: true },
   logger: () => {},
@@ -243,6 +276,102 @@ test("nearby hotels can be searched for a requested area", async () => {
   assert.ok(r.body.nearbyHotels.length > 0);
   assert.match(r.body.nearbyHotels[0].name, /Hotel|Resort|Stay/i);
   assert.equal(r.body.context.location, "Goa, India");
+});
+
+test("nearby hotels use live location data for an arbitrary area", async () => {
+  let requestCount = 0;
+  const liveApp = createApp({
+    aiOptions: { demo: true },
+    placesOptions: {
+      fetchImpl: async (url) => {
+        requestCount += 1;
+        if (requestCount === 1)
+          return {
+            ok: true,
+            json: async () => [
+              { lat: "18.5204", lon: "73.8567", display_name: "Pune, Maharashtra, India" },
+            ],
+          };
+        return {
+          ok: true,
+          json: async () => ({
+            elements: [
+              {
+                type: "node",
+                lat: 18.521,
+                lon: 73.857,
+                tags: { name: "Live Pune Hotel", tourism: "hotel" },
+              },
+            ],
+          }),
+        };
+      },
+    },
+    logger: () => {},
+    rateLimitEnabled: false,
+  });
+  const r = await request(liveApp)
+    .post("/api/chat")
+    .send({ message: "Find nearby hotels in Pune" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.context.location, "Pune, Maharashtra, India");
+  assert.equal(r.body.nearbyHotels[0].name, "Live Pune Hotel");
+  assert.equal(requestCount, 2);
+});
+
+test("offline mode does not mislabel Goa hotels as another area", async () => {
+  const r = await chat("Find nearby hotels in Pune");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.nearbyHotels, []);
+  assert.match(r.body.answer, /could not find nearby hotel listings/i);
+});
+
+test("explicit city overrides saved location and supports ordinary hotel queries", async () => {
+  for (const message of ["Find nearby hotels in Pune", "Hotels in Pune, India"] ) {
+    const r = await chat(message, { context: { location: "Goa, India" } });
+    assert.equal(r.status, 200);
+    assert.match(r.body.context.location, /^Pune/);
+    assert.deepEqual(r.body.nearbyHotels, []);
+  }
+  const r = await chat("Find nearby hotels in your area", { context: { location: "Goa, India" } });
+  assert.ok(r.body.nearbyHotels.length);
+  assert.match(r.body.notice, /not live search results/);
+});
+
+test("long geocoded locations remain valid in follow-up context", async () => {
+  const r = await chat("Pool?", { context: { location: "Long area name, ".repeat(20) } });
+  assert.equal(r.status, 200);
+  const followup = await chat("And when is it open?", { context: r.body.context });
+  assert.equal(followup.status, 200);
+  assert.match(followup.body.answer, /7:00 AM/);
+});
+
+test("places retries malformed responses and handles absent display names", async () => {
+  let calls = 0;
+  const result = await searchNearbyHotels("Pune", { fetchImpl: async () => ({
+    ok: true,
+    json: async () => ++calls === 1 ? [{ lat: "18.5", lon: "73.8" }] :
+      calls === 2 ? {} : { elements: [{ lat: 18.5, lon: 73.8, tags: { name: "Test Hotel" } }] },
+  }) });
+  assert.equal(calls, 3);
+  assert.equal(result.location, "Pune");
+  assert.equal(result.hotels[0].reason, "Near Pune");
+});
+
+test("places retries share an overall time budget", async () => {
+  let calls = 0;
+  const keepAlive = setTimeout(() => {}, 1000);
+  try {
+    await assert.rejects(searchNearbyHotels("Pune", {
+      timeoutMs: 1000, totalTimeoutMs: 25,
+      fetchImpl: async (_url, { signal }) => {
+        calls++;
+        if (calls === 1) return { ok: true, json: async () => [{ lat: "18.5", lon: "73.8" }] };
+        return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      },
+    }));
+    assert.equal(calls, 2);
+  } finally { clearTimeout(keepAlive); }
 });
 
 test("logs include request metadata, never question or key", async () => {

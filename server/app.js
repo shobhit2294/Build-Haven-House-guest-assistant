@@ -12,8 +12,10 @@ import {
   resolveNearbyHotels,
 } from "./domain.js";
 import { routeQuestion } from "./ai.js";
+import { searchNearbyHotels } from "./places.js";
 export function createApp({
   aiOptions = {},
+  placesOptions = {},
   logger = console.log,
   rateLimitEnabled = true,
 } = {}) {
@@ -70,13 +72,26 @@ export function createApp({
   app.post("/api/chat", async (req, res, next) => {
     try {
       const input = chatSchema.parse(req.body);
-      const route = await routeQuestion(input, aiOptions);
-      const requestedArea = hotel.location;
+      const route = input.position
+        ? { topics: ["nearbyHotels"], mode: "location" }
+        : await routeQuestion(input, aiOptions);
+      const explicitArea = input.message
+        .match(/\bhotels?\s+(?:in|near|around)\s+(.+?)[?.!]*$/i)?.[1]?.trim();
+      const requestedAreaInput =
+        (explicitArea && !/^(your|my|the) area$/i.test(explicitArea) ? explicitArea : null) ||
+        input.context?.location?.trim() ||
+        hotel.location;
+      const requestedArea =
+        requestedAreaInput.toLowerCase() === "goa"
+          ? hotel.location
+          : requestedAreaInput;
       const wantsAvailability =
         !!input.stay || route.topics.includes("availability");
       const wantsNearbyHotels = route.topics.includes("nearbyHotels");
       let availability = null;
       let nearbyHotels = [];
+      let resolvedLocation = requestedArea;
+      let nearbyNotice = null;
       const facts = route.topics.filter((t) => hotel.facts[t]);
       let answer = facts.map((t) => hotel.facts[t]).join("\n\n");
 
@@ -99,12 +114,29 @@ export function createApp({
       }
 
       if (wantsNearbyHotels) {
-        nearbyHotels = resolveNearbyHotels(requestedArea);
-        const areaLabel = requestedArea.trim() || hotel.location;
-        answer =
-          nearbyHotels.length > 0
-            ? `I found a few nearby stay options in ${areaLabel}.`
-            : `I could not find a nearby hotel list for ${areaLabel}. Please try a major city or area near your destination.`;
+        try {
+          const livePlacesEnabled =
+            Boolean(aiOptions.apiKey ?? process.env.GROQ_API_KEY) &&
+            !(aiOptions.demo ?? (process.env.DEMO_MODE === "true"));
+          const nearbyResult = input.position || livePlacesEnabled || placesOptions.fetchImpl
+            ? await searchNearbyHotels(requestedArea, { ...placesOptions, position: input.position })
+            : { location: requestedArea, hotels: resolveNearbyHotels(requestedArea) };
+          nearbyHotels = nearbyResult.hotels;
+          if (!input.position && !livePlacesEnabled && !placesOptions.fetchImpl && nearbyHotels.length)
+            nearbyNotice = "Sample hotel listings and distances for this fictional demo; these are not live search results.";
+          resolvedLocation = input.position ? requestedArea : nearbyResult.location || requestedArea;
+          if (input.position)
+            nearbyNotice = "Approximate straight-line distances from your device location, within 10 km. Walking and driving distances differ. Listings: OpenStreetMap contributors.";
+          const areaLabel = nearbyResult.location || requestedArea;
+          answer += (answer ? "\n\n" : "") + (
+            nearbyHotels.length > 0
+              ? input.position ? "I found these hotels near your current location, closest first." : `I found a few nearby stay options in ${areaLabel}.`
+              : `I could not find nearby hotel listings for ${areaLabel}. Please try another area or check again later.`);
+        } catch {
+          nearbyNotice =
+            "Live location search is temporarily unavailable. Please try again shortly.";
+          answer += (answer ? "\n\n" : "") + nearbyNotice;
+        }
       }
 
       if (!answer) answer = unknownAnswer;
@@ -119,18 +151,19 @@ export function createApp({
             : wantsAvailability
               ? "availability"
               : route.topics.at(-1),
-          location: requestedArea.trim() || hotel.location,
+          location: resolvedLocation.trim().slice(0, 500) || hotel.location,
         },
         needsStay: wantsAvailability && !input.stay,
         availability,
         nearbyHotels,
         sources: facts.map((id) => ({ id, label: `Hotel guide · ${id}` })),
         notice:
-          route.mode === "fallback"
+          nearbyNotice ||
+          (route.mode === "fallback"
             ? "AI is temporarily unavailable. This answer uses the local hotel guide."
             : route.mode === "demo"
               ? "Demo mode · answering from the local hotel guide."
-              : null,
+              : null),
       });
     } catch (e) {
       next(e);

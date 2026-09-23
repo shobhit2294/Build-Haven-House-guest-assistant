@@ -14,7 +14,7 @@ const SUGGESTIONS = [
   "Is breakfast included?",
   "Which room is best for three guests?",
   "What is the cancellation policy?",
-  "Find nearby hotels in Goa",
+  "Find nearby hotels in your area",
 ];
 
 const money = (amount) =>
@@ -190,9 +190,11 @@ function App() {
   const [question, setQuestion] = useState("");
   const [context, setContext] = useState({ location: "Goa, India" });
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(null);
   const [mode, setMode] = useState("Checking connection");
+  const [location, setLocation] = useState("Goa, India");
   const [stay, setStay] = useState({ checkIn: "", checkOut: "", adults: 2 });
 
   const endRef = useRef(null);
@@ -218,7 +220,7 @@ function App() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, busy]);
 
-  async function send(text, details, again = false) {
+  async function send(text, details, again = false, position) {
     if (lockRef.current || !text.trim()) return;
 
     lockRef.current = true;
@@ -240,7 +242,7 @@ function App() {
 
     setQuestion("");
     controllerRef.current = new AbortController();
-    const timeoutId = setTimeout(() => controllerRef.current.abort(), 15000);
+    const timeoutId = setTimeout(() => controllerRef.current.abort(), 25000);
 
     try {
       const response = await fetch("/api/chat", {
@@ -250,8 +252,9 @@ function App() {
         body: JSON.stringify({
           message: text,
           history,
-          context: { ...context, location: "Goa, India" },
+          context: { ...context, location },
           ...(details ? { stay: details } : {}),
+          ...(position ? { position } : {}),
         }),
       });
 
@@ -281,7 +284,8 @@ function App() {
       ]);
 
       setContext(data.context);
-      setMode(
+      if (data.context?.location) setLocation(data.context.location);
+      if (data.mode !== "location") setMode(
         data.mode === "groq"
           ? "AI connected"
           : data.mode === "fallback"
@@ -300,7 +304,7 @@ function App() {
             ? "We couldn’t connect. Please check your connection and try again."
             : errorValue.message,
       );
-      setRetry({ text, details });
+      setRetry({ text, details, position });
     } finally {
       clearTimeout(timeoutId);
       lockRef.current = false;
@@ -311,6 +315,7 @@ function App() {
   function resetChat() {
     setMessages([WELCOME_MESSAGE]);
     setContext({ location: "Goa, India" });
+    setLocation("Goa, India");
     setError("");
     setRetry(null);
     setQuestion("");
@@ -321,6 +326,45 @@ function App() {
       ...currentStay,
       [field]: value,
     }));
+  }
+
+  function searchLocation(event) {
+    event.preventDefault();
+    const area = location.trim();
+    if (area) send(`Find nearby hotels in ${area}`);
+  }
+
+  function useMyLocation() {
+    if (lockRef.current) return;
+    setError("");
+    setRetry(null);
+    if (!navigator.geolocation) {
+      setError("Location is unavailable in this browser. Please search a city or area.");
+      return;
+    }
+    lockRef.current = true;
+    setBusy(true);
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        lockRef.current = false;
+        setLocating(false);
+        send("Find hotels near my current location", undefined, false, {
+          lat: coords.latitude, lon: coords.longitude,
+        });
+      },
+      (failure) => {
+        lockRef.current = false;
+        setBusy(false);
+        setLocating(false);
+        setError(failure.code === 1
+          ? "Location permission was denied. Allow location in your browser settings or search a city or area."
+          : failure.code === 3
+            ? "Finding your location timed out. Try Use my location again or search a city or area."
+            : "Could not determine your location. Try again or search a city or area.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
   }
 
   function submitStay(event) {
@@ -347,9 +391,30 @@ function App() {
           </span>
         </a>
 
-        <span className="location">
-          GOA, INDIA <span>·</span> FICTIONAL HOTEL
-        </span>
+        <div className="location-box">
+          <form className="location-search" onSubmit={searchLocation}>
+            <label className="sr-only" htmlFor="location">
+              Search location
+            </label>
+            <input
+              id="location"
+              maxLength={500}
+              value={location}
+              onChange={(event) => setLocation(event.target.value)}
+              placeholder="Search any location"
+              disabled={busy}
+            />
+            <button type="submit" disabled={busy || !location.trim()}>
+              Search
+            </button>
+          </form>
+          <button type="button" className="text-button" onClick={useMyLocation} disabled={busy}>
+            {locating ? "Finding your location…" : "Use my location"}
+          </button>
+          <span className="location">
+            {location.toUpperCase()} <span>·</span> HOTEL SEARCH
+          </span>
+        </div>
       </header>
 
       <main>
@@ -415,7 +480,7 @@ function App() {
                 {retry && (
                   <button
                     disabled={busy}
-                    onClick={() => send(retry.text, retry.details, true)}
+                    onClick={() => send(retry.text, retry.details, true, retry.position)}
                   >
                     Try again
                   </button>
@@ -524,4 +589,3 @@ function App() {
 }
 
 createRoot(document.getElementById("root")).render(<App />);
-

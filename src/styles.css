@@ -55,6 +55,8 @@ select:focus-visible {
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
   justify-content: space-between;
   align-items: center;
   padding: 27px 0;
@@ -88,11 +90,15 @@ select:focus-visible {
 
 .location-box {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 16px;
 }
 
 .location {
+  overflow-wrap: anywhere;
   font-size: 10px;
   letter-spacing: 1.5px;
 }

@@ -1,5 +1,43 @@
 import { test, expect } from "@playwright/test";
 import { checkAvailability } from "../../server/domain.js";
+test("device location permission sends coordinates and renders distances", async ({ page, context }) => {
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: 18.5204, longitude: 73.8567 });
+  let payload;
+  await page.route("**/api/chat", async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({ json: {
+      answer: "Hotels near your current location, closest first.", mode: "location",
+      context: { location: "Goa, India", topic: "nearbyHotels" },
+      notice: "Approximate straight-line distances from your device location.",
+      nearbyHotels: [{ name: "Nearby Test Hotel", distance: "250 m", type: "Hotel", reason: "From your location" }],
+    } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Use my location" }).click();
+  await expect(page.getByText("Nearby Test Hotel")).toBeVisible();
+  await expect(page.getByText("250 m", { exact: true })).toBeVisible();
+  expect(payload.position).toEqual({ lat: 18.5204, lon: 73.8567 });
+  await page.getByLabel("Your question").fill("Pool?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Use my location" })).toBeEnabled();
+  expect(payload.position).toBeUndefined();
+});
+
+test("denied device location shows a recoverable error without searching", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "geolocation", { value: {
+      getCurrentPosition: (_success, failure) => failure({ code: 1 }),
+    } });
+  });
+  let calls = 0;
+  await page.route("**/api/chat", route => { calls++; return route.abort(); });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Use my location" }).click();
+  await expect(page.getByRole("alert")).toContainText("permission was denied");
+  await expect(page.getByRole("button", { name: "Search", exact: true })).toBeEnabled();
+  expect(calls).toBe(0);
+});
 const nextDate = (n) =>
   new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 test("guest journey: real backend facts, follow-up, availability, unknown and reset", async ({
@@ -110,4 +148,15 @@ test("desktop preview", async ({ page }) => {
     page.getByText("Local guide · demo", { exact: true }),
   ).toBeVisible();
   await page.screenshot({ path: "test-results/desktop.png", fullPage: true });
+});
+
+test("chat location overrides the search field without showing unrelated demo hotels", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Your question").fill("Hotels in Pune, India");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/could not find nearby hotel listings for Pune, India/)).toBeVisible();
+  await expect(page.getByLabel("Search location")).toHaveValue("Pune, India");
+  await page.getByLabel("Search location").fill("Goa");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText(/not live search results/)).toBeVisible();
 });

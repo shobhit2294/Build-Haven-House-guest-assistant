@@ -52,6 +52,18 @@ The app avoids unsupported answers by:
 - falling back to the local guide when AI fails or times out
 - never exposing raw API keys or model errors to the browser
 
+Nearby hotel search is location-aware. The entered area is geocoded with
+Nominatim and nearby hotel listings are read from OpenStreetMap Overpass. Groq
+classifies the request, but it does not invent hotel names or distances. If a
+live provider is unavailable, the assistant returns a clear retry message.
+
+Choose **Use my location** and allow browser location access to find hotels
+within 10 km of your device, nearest first. Distances are approximate straight-line
+distances, not driving routes. This lookup uses OpenStreetMap directly without an
+AI key; coordinates are sent only for that search, not to the AI classifier.
+Device location requires HTTPS or localhost. City search remains available if
+location permission is denied.
+
 Common failure cases are handled with clear UX:
 - network failure → visible error and retry action
 - invalid dates → validation message
@@ -77,6 +89,10 @@ Common failure cases are handled with clear UX:
 - Optional Groq integration for topic classification
 - local fallback path when the key is missing or the model fails
 - model output remains constrained; the final answer is built from trusted hotel data
+
+When `DEMO_MODE=false` and `GROQ_API_KEY` is configured, the app enables live
+location lookup. Without a key, the local demo path remains available for the
+hotel guide and simulated availability.
 
 ### Data flow
 - browser sends question + history + optional stay

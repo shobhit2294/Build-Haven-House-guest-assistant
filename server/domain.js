@@ -68,11 +68,15 @@ export const chatSchema = z
         topic: z
           .enum([...topics, "availability", "nearbyHotels", "unknown"])
           .optional(),
-        location: z.string().max(80).optional(),
+        location: z.string().max(500).optional(),
       })
       .strict()
       .default({}),
     stay: staySchema.optional(),
+    position: z.object({
+      lat: z.number().finite().min(-90).max(90),
+      lon: z.number().finite().min(-180).max(180),
+    }).strict().optional(),
   })
   .strict();
 // Stable across runs: use the minimum remaining inventory across ALL nights.
@@ -102,7 +106,10 @@ export function checkAvailability(checkIn, checkOut, adults) {
   };
 }
 export function resolveNearbyHotels(area = "") {
-  return hotel.nearbyHotels?.goa || [];
+  const normalized = area.trim().toLowerCase();
+  return /^(goa|goa,\s*india)$/.test(normalized)
+    ? hotel.nearbyHotels?.goa || []
+    : [];
 }
 
 export function localRoute(message, context = {}) {
@@ -110,7 +117,7 @@ export function localRoute(message, context = {}) {
   if (/availab|vacanc|book|reserv|check rooms|rooms? for.*\d{4}-/.test(m))
     return ["availability"];
   if (
-    /nearby.*hotel|hotels?.*(near|around)|search.*(hotel|stay).*in|in\s+goa/.test(
+    /nearby.*hotel|hotels?\s+(?:in|near|around)\b|search.*(hotel|stay).*in/.test(
       m,
     )
   )
