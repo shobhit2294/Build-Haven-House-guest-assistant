@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
 import { z } from "zod";
-export const hotel = JSON.parse(
-  readFileSync(new URL("./hotel.json", import.meta.url)),
-);
+import { hotel } from "./hotel.js";
+
+export { hotel };
 export const topics = Object.keys(hotel.facts);
 export const day = 86400000;
 export function today() {
@@ -111,7 +110,7 @@ export function localRoute(message, context = {}) {
   if (/availab|vacanc|book|reserv|check rooms|rooms? for.*\d{4}-/.test(m))
     return ["availability"];
   if (
-    /nearby.*hotel|hotels?.*(near|around)|search.*(hotel|stay).*in|in\s+(pune|mumbai|goa|bangalore|jaipur|delhi|hyderabad)/.test(
+    /nearby.*hotel|hotels?.*(near|around)|search.*(hotel|stay).*in|in\s+goa/.test(
       m,
     )
   )

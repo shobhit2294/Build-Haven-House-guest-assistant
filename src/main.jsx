@@ -14,7 +14,7 @@ const SUGGESTIONS = [
   "Is breakfast included?",
   "Which room is best for three guests?",
   "What is the cancellation policy?",
-  "Find nearby hotels in Pune",
+  "Find nearby hotels in Goa",
 ];
 
 const money = (amount) =>
@@ -255,7 +255,17 @@ function App() {
         }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw Error(
+          response.ok
+            ? "The assistant returned an invalid response. Please try again."
+            : "The assistant service is unavailable. Please try again shortly.",
+        );
+      }
 
       if (!response.ok) {
         throw Error(

@@ -68,7 +68,7 @@ Common failure cases are handled with clear UX:
 
 ### Backend
 - Express server
-- JSON hotel knowledge base
+- server-side hotel knowledge base module
 - validation with Zod
 - request logging and structured JSON responses
 - basic rate limiting and error handling
@@ -158,10 +158,7 @@ npm run build
 npm run test:e2e
 ```
 
-Current verification status:
-- backend tests: 20 passed, 0 failed
-- production build: passed
-- browser flow: passed
+Current verification status is maintained by the automated test commands above.
 
 Additional evaluation notes are in [docs/EVALUATION.md](docs/EVALUATION.md) and product decisions in [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -185,6 +182,6 @@ This project was developed with GitHub Copilot and standard local development to
 - `server/app.js` — API routes and validation
 - `server/ai.js` — AI routing and fallback logic
 - `server/domain.js` — date, capacity, and room availability logic
-- `server/hotel.json` — hotel facts and room data
+- `server/hotel.js` — hotel facts and room data
 - `tests/backend.test.js` — backend scenarios
 - `tests/e2e/guest.spec.js` — end-to-end browser checks
