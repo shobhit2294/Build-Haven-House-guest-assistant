@@ -127,6 +127,21 @@ npm run build
 npm start
 ```
 
+## Vercel deployment
+
+Import the repository with the project root set to the folder containing
+`package.json`. Use the Vite preset, `npm run build`, and output directory `dist`.
+The checked-in `api/[...path].js` exposes the Express API as a Vercel Function;
+`vercel.json` sets its time limit to 30 seconds for provider lookups.
+Do not add an all-path rewrite to `index.html`, because API requests must reach
+the function. Set `GROQ_API_KEY`, `GROQ_MODEL`, and `DEMO_MODE=false` in Vercel
+environment variables for AI mode. No `PORT` variable is required.
+
+After pushing these files and deploying, check `/api/health` returns JSON with
+`"status":"ok"`. If it returns a Vercel 404 page, confirm the deployed commit
+includes the `api` folder and the Root Directory points to this project.
+For function failures, check the deployment's runtime logs.
+
 ## Optional AI configuration
 
 Create a `.env` file based on `.env.example`:
